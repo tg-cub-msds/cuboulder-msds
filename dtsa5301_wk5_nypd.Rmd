@@ -1,0 +1,411 @@
+---
+title: "dtsa5301_wk5_nypd"
+author: "tg1073"
+output: html_document
+date: "2025-02-20"
+---
+
+```{r setup, include=FALSE}
+# Automatically install and load packages if not already available
+
+packages <- c("tidyverse", "lubridate", "ggplot2","dplyr")
+
+for (p in packages) {
+  if (!require(p, character.only = TRUE)) {
+    install.packages(p, dependencies = TRUE)
+    library(p, character.only = TRUE)
+  }
+}
+
+# Set chunk options
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Import data, fix data type and simple data transformation
+
+This code imports data, fixes the data type of columns to achieve consistency and ensures that subsequent codes run. Last but not least, I dropped columns that are not needed,
+
+```{r import_data}
+# Import data
+data <- read.csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+
+
+# Convert to appropriate types
+data <- data %>%
+  mutate(OCCUR_DATE = as.Date(OCCUR_DATE, format = "%m/%d/%Y"),
+         OCCUR_TIME = hms::as_hms(OCCUR_TIME),
+         VIC_AGE_GROUP = factor(VIC_AGE_GROUP, levels = c("<18", "18-24", "25-44", "45-64", "65+")),
+         PERP_SEX = as.factor(PERP_SEX),
+         PERP_RACE = as.factor(PERP_RACE),
+         VIC_SEX = as.factor(VIC_SEX),
+         VIC_RACE = as.factor(VIC_RACE),
+         BORO = as.factor(BORO),
+         STATISTICAL_MURDER_FLAG = as.logical(STATISTICAL_MURDER_FLAG))
+
+# Drop unnecessary columns
+data <- data %>% select(-c(Lon_Lat, X_COORD_CD, Y_COORD_CD, JURISDICTION_CODE))
+
+# Summary of the cleaned data
+summary(data)
+```
+
+### Data Cleaning: Handling Missing and Blank Values
+
+This code performs essential data cleaning by:
+
+1.  **Checking Missing Data**:
+    -   The `colSums(is.na(data) | data == "")` command calculates the total number of missing (`NA`) or blank (`""`) values in each column. This helps identify where data issues exist.
+2.  **Removing Invalid Rows**:
+    -   The `filter()` function removes rows where critical columns (`PERP_RACE` and `VIC_RACE`) have missing (`NA`) or blank (`""`) values.
+    -   Ensuring these columns are complete is crucial for the accuracy of subsequent analyses.
+3.  **Result**:
+    -   The cleaned dataset, `data_cleaned`, retains only rows with valid data in `PERP_RACE` and `VIC_RACE`, preparing it for reliable analysis and modeling.
+4.  **Potential Bias**:
+    -   By removing rows with missing values, there is a possibility of introducing bias if the missing data is not random (e.g., certain races or categories are disproportionately affected). Future steps should address this concern by exploring patterns in the removed data.
+
+```{r clean_data}
+# Check initial missing data
+missing_summary <- colSums(is.na(data) | data == "")
+missing_summary
+
+# Remove rows with missing or blank values for critical columns
+data_cleaned <- data %>%
+  filter(
+    !is.na(PERP_RACE) & PERP_RACE != "",     # Remove rows where PERP_RACE is NA or blank
+    !is.na(VIC_RACE) & VIC_RACE != ""        # Remove rows where VIC_RACE is NA or blank
+  )
+```
+
+### Visualization: Shooting Incidents by Year
+
+1.  **Data Preparation**
+    -   We grouped the dataset by `YEAR` to count the total number of incidents for each year.
+    -   A gradient fill was applied so bars with higher incident counts appear as darker red.
+2.  **Insights**
+    -   Early years (e.g., 2006–2010) show relatively high incident counts that gradually decline toward the mid-2010s.
+    -   Recent years (2021–2022) see a noticeable spike, suggesting a potential upward trend in shootings. The increase also coincided with the period where there was the COVID outbreak, which may be abnormal given that shelter-in-place policies were in effect.
+    -   These fluctuations may be influenced by socio-economic changes, policing strategies, or other external factors.
+
+------------------------------------------------------------------------
+
+### Visualization: Shooting Incidents by Month (All Years Combined)
+
+1.  **Data Preparation**
+    -   We grouped by `MONTH` (across all available years) and counted total incidents for each month.
+    -   Months were labeled using `lubridate::month()` with `label=TRUE` for easy reading.
+2.  **Insights**
+    -   Warmer months, especially **July** and **August**, typically show higher shooting incidents.
+    -   Cooler months like **January** and **February** see comparatively fewer incidents.
+    -   This pattern points to possible seasonal effects—summer might correlate with increased outdoor activity or social factors leading to higher conflict.
+
+------------------------------------------------------------------------
+
+### Visualization: Shooting Incidents by Month (2021, 2022, 2023)
+
+1.  **Data Preparation**
+    -   For each year (2021, 2022, 2023), the data is grouped by `MONTH` and then summarized to get total incidents.
+    -   Each chart uses a similar red gradient fill to highlight differences in monthly counts.
+2.  **Insights**
+    -   **2021**: Peaks around **May–August**, then tapers off in the fall and winter.\
+    -   **2022**: Highest incidents occur in **July**, with spring and late summer also relatively high.\
+    -   **2023**: Shows a similar mid-year spike in **July**, with moderate levels in spring and a decrease toward the end of the year.\
+    -   Comparing each chart helps us see yearly differences and identify whether the seasonal spike is consistent or if certain months vary year-to-year.
+
+------------------------------------------------------------------------
+
+### Visualization: Percentage of Total Incidents by Hour
+
+1.  **Data Preparation**
+    -   The `OCCUR_TIME` column was converted to a time object using `lubridate::hms()`, then we extracted the `HOUR` (0–23).
+    -   We calculated each hour’s share of total incidents, then plotted these percentages in a bar chart.
+2.  **Insights**
+    -   Hours **1 AM–3 AM** and **9 PM–11 PM** show a higher percentage of incidents compared to midday and early morning.
+    -   Incident activity seems to dip notably around **7 AM–9 AM**, suggesting fewer recorded shootings during typical commute or early morning hours.
+    -   This distribution can inform resource allocation strategies for law enforcement or community outreach programs focusing on late-night and early-morning crime prevention.
+
+------------------------------------------------------------------------
+
+**Overall Observations and Significance**\
+- Across multiple years, months, and hours, the data suggests recurring patterns: higher incidents in warm months, late evenings, and certain years show notable spikes.\
+- Such patterns underscore the importance of context (e.g., policy changes or socio-economic shifts) in interpreting trends.\
+- Future work might explore the interplay between neighborhood-level data, community resources, and specific historical events to understand and address these spikes more effectively.
+
+```{r plot_incidents_by_year, fig.width=12, fig.height=8}
+
+# Example: Summarize incidents by year
+yearly_summary <- data_cleaned %>%
+  mutate(YEAR = year(OCCUR_DATE)) %>%
+  filter(!is.na(YEAR)) %>%
+  group_by(YEAR) %>%
+  summarise(Incidents = n())
+
+# Map fill to "Incidents" to shade bars by the count value
+ggplot(yearly_summary, aes(x = factor(YEAR), y = Incidents, fill = Incidents)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  # Use a gradient from light red to dark red
+  scale_fill_gradient(low = "mistyrose", high = "red", name = "Incidents") +
+  theme_minimal(base_size = 18) +
+  theme(
+    axis.text.x  = element_text(size = 16),
+    axis.text.y  = element_text(size = 16),
+    axis.title.x = element_text(size = 18, face = "bold"),
+    axis.title.y = element_text(size = 18, face = "bold"),
+    plot.title   = element_text(size = 20, face = "bold", hjust = 0.5)
+  ) +
+  labs(
+    title = "Shooting Incidents by Year",
+    x = "Year",
+    y = "Number of Incidents"
+  )
+
+  monthly_summary <- data_cleaned %>%
+  mutate(MONTH = month(OCCUR_DATE, label = TRUE)) %>%
+  filter(!is.na(MONTH)) %>%
+  group_by(MONTH) %>%
+  summarise(Incidents = n())
+
+ggplot(monthly_summary, aes(x = MONTH, y = Incidents, fill = Incidents)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_gradient(low = "mistyrose", high = "red", name = "Incidents") +
+  theme_minimal(base_size = 18) +
+  theme(
+    axis.text.x  = element_text(size = 16),
+    axis.text.y  = element_text(size = 16),
+    axis.title.x = element_text(size = 18, face = "bold"),
+    axis.title.y = element_text(size = 18, face = "bold"),
+    plot.title   = element_text(size = 20, face = "bold", hjust = 0.5)
+  ) +
+  labs(
+    title = "Shooting Incidents by Month (All Years Combined)",
+    x = "Month",
+    y = "Number of Incidents"
+  )
+```
+
+```{r plot_incidents_by_month, fig.width=12, fig.height=6}
+
+# Convert to Date if not already done
+data_cleaned$OCCUR_DATE <- as.Date(data_cleaned$OCCUR_DATE, format = "%m/%d/%Y")
+
+# Filter only the years of interest
+df_filtered <- data_cleaned %>%
+  mutate(
+    YEAR = year(OCCUR_DATE),
+    MONTH = month(OCCUR_DATE, label = TRUE)  # label = TRUE gives short month names
+  ) %>%
+  filter(YEAR %in% c(2021, 2022, 2023))
+
+# Summarize by YEAR and MONTH
+df_summary <- df_filtered %>%
+  group_by(YEAR, MONTH) %>%
+  summarise(Incidents = n(), .groups = "drop")
+
+# -- 1) Chart for 2021 ----------------------------------------------------
+df_2021 <- df_summary %>% filter(YEAR == 2021)
+
+ggplot(df_2021, aes(x = MONTH, y = Incidents, fill = Incidents)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_gradient(low = "mistyrose", high = "red", name = "Incidents") +
+  theme_minimal(base_size = 16) +
+  labs(
+    title = "Shooting Incidents by Month (2021)",
+    x = "Month",
+    y = "Number of Incidents"
+  ) +
+  theme(
+    plot.title   = element_text(face = "bold", hjust = 0.5),
+    legend.position = "right"
+  )
+
+# -- 2) Chart for 2022 ----------------------------------------------------
+df_2022 <- df_summary %>% filter(YEAR == 2022)
+
+ggplot(df_2022, aes(x = MONTH, y = Incidents, fill = Incidents)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_gradient(low = "mistyrose", high = "red", name = "Incidents") +
+  theme_minimal(base_size = 16) +
+  labs(
+    title = "Shooting Incidents by Month (2022)",
+    x = "Month",
+    y = "Number of Incidents"
+  ) +
+  theme(
+    plot.title   = element_text(face = "bold", hjust = 0.5),
+    legend.position = "right"
+  )
+
+# -- 3) Chart for 2023 ----------------------------------------------------
+df_2023 <- df_summary %>% filter(YEAR == 2023)
+
+ggplot(df_2023, aes(x = MONTH, y = Incidents, fill = Incidents)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_gradient(low = "mistyrose", high = "red", name = "Incidents") +
+  theme_minimal(base_size = 16) +
+  labs(
+    title = "Shooting Incidents by Month (2023)",
+    x = "Month",
+    y = "Number of Incidents"
+  ) +
+  theme(
+    plot.title   = element_text(face = "bold", hjust = 0.5),
+    legend.position = "right"
+  )
+```
+
+```{r plot_incidents_by_hour, fig.width=12, fig.height=8}
+data_cleaned$OCCUR_TIME <- hms(data_cleaned$OCCUR_TIME)
+data_cleaned$HOUR <- hour(data_cleaned$OCCUR_TIME)
+
+# Filter out any rows where HOUR is NA
+severity_by_hour <- data_cleaned %>%
+  filter(!is.na(HOUR)) %>%        # <--- This line removes NA rows
+  group_by(HOUR) %>%
+  summarise(Incidents = n(), .groups = "drop")
+
+# Now calculate and plot the percentages
+total_incidents <- sum(severity_by_hour$Incidents)
+severity_by_hour <- severity_by_hour %>%
+  mutate(Percentage = (Incidents / total_incidents) * 100)
+
+ggplot(severity_by_hour, aes(x = factor(HOUR), y = Percentage, fill = Percentage)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  scale_fill_gradient(low = "mistyrose", high = "red", name = "Percentage") +
+  labs(
+    title = "Percentage of Total Incidents by Hour",
+    x = "Hour of the Day",
+    y = "Percent of Incidents"
+  ) +
+  theme_minimal(base_size = 16)
+```
+
+### Visualization: Incidents by Borough
+
+This visualization illustrates the distribution of shooting incidents across boroughs.
+
+1.  **Data Preparation**:
+    -   The data is grouped by `BORO` (borough) using `group_by(BORO)`, and the total number of incidents is calculated for each borough using `summarise(Incidents = n())`.
+2.  **Insights**:
+    -   Brooklyn and Bronx have the highest number of incidents, followed by Queens, Manhattan, and Staten Island.
+    -   This geographic distribution suggests a concentration of incidents in specific boroughs, which might reflect underlying factors such as population density, socio-economic conditions, or crime patterns.
+
+```{r borough, fig.width=12, fig.height=8}
+
+# Count incidents by borough
+borough_summary <- data_cleaned %>%
+  group_by(BORO) %>%
+  summarise(Incidents = n())
+
+ggplot(borough_summary, aes(x = reorder(BORO, -Incidents), y = Incidents, fill = BORO)) +
+  geom_bar(stat = "identity", width = 0.6) +  # Adjust bar width
+  theme_minimal(base_size = 18) +            # Increase base font size
+  theme(
+    axis.text.x = element_text(size = 16),   # Increase x-axis text size
+    axis.text.y = element_text(size = 16),   # Increase y-axis text size
+    axis.title.x = element_text(size = 18, face = "bold"),  # Bold x-axis title
+    axis.title.y = element_text(size = 18, face = "bold"),  # Bold y-axis title
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),  # Center plot title
+    legend.position = "none"                 # Remove legend
+  ) +
+  labs(
+    title = "Incidents by Borough",
+    x = "Borough",
+    y = "Number of Incidents"
+  )
+```
+
+### Insights: Perpetrator Race Breakdown (% of Total Incidents)
+
+1.  **Dominance of Black Perpetrators**:
+    -   Black perpetrators account for the largest proportion of incidents, making up **65.7%** of the total. This is significantly higher than any other category.
+2.  **Notable Contribution of White Hispanic Perpetrators**:
+    -   White Hispanic perpetrators are the second largest group, comprising **13.9%** of the total incidents.
+
+```{r perp_race_breakdown}
+# Pivot table: % of total perpetrator type, excluding nulls and blanks, sorted
+perp_type_pct <- data_cleaned %>%
+  filter(
+    VIC_RACE != "(null)", PERP_RACE != "(null)", # Exclude "(null)"
+    VIC_RACE != "", PERP_RACE != ""             # Exclude empty strings
+  ) %>%
+  group_by(PERP_RACE) %>%
+  summarise(Total_Incidents = n(), .groups = "drop") %>%
+  mutate(Percent = Total_Incidents / sum(Total_Incidents) * 100) %>%
+  arrange(desc(Percent)) %>% # Sort by percentage in descending order
+  mutate(Percent = sprintf("%.1f%%", Percent)) # Format percentage with 1 decimal place
+
+# View the pivot table
+perp_type_pct
+```
+
+### Insights: Victim Race by Perpetrator Race (% Breakdown)
+
+1.  **High Proportion of Same-Race Incidents**:
+    -   For Black victims, **76.7%** of incidents involve Black perpetrators, indicating a significant proportion of intra-racial incidents.
+    -   Similarly, White Hispanic victims see **41.0%** of incidents involving White Hispanic perpetrators.
+2.  **Cross-Race Incidents**:
+    -   Black perpetrators are involved in a substantial portion of incidents across victim races, including **50.0%** of incidents involving American Indian/Alaskan Native victims and **36.4%** of incidents involving White victims.
+    -   Asian / Pacific Islander victims have a relatively diverse distribution of perpetrator races, with **19.3%** involving Asian / Pacific Islander perpetrators and **51.9%** involving Black perpetrators.
+3.  **Key Observations**:
+    -   White perpetrators account for a notable **29.3%** of incidents involving White victims but contribute minimally across other victim races.
+    -   Black Hispanic perpetrators have a larger presence in incidents involving Black Hispanic victims (**19.9%**) compared to other victim races.
+
+```{r }
+perp_victim_pct <- data_cleaned %>%
+  filter(
+    VIC_RACE != "(null)", PERP_RACE != "(null)", # Exclude "(null)"
+    VIC_RACE != "", PERP_RACE != ""             # Exclude empty strings
+  ) %>%
+  group_by(VIC_RACE, PERP_RACE) %>%
+  summarise(Incidents = n(), .groups = "drop") %>%
+  group_by(VIC_RACE) %>%
+  mutate(Percent = Incidents / sum(Incidents) * 100) %>% # Percentage for each row
+  ungroup() %>%
+  select(VIC_RACE, PERP_RACE, Percent) %>%
+  pivot_wider(names_from = PERP_RACE, values_from = Percent, values_fill = 0) %>% # Pivot to wide format
+  mutate(across(-VIC_RACE, ~ sprintf("%.1f%%", .))) # Format percentages with 1 decimal place
+
+# View the pivot table
+perp_victim_pct
+```
+
+### Insights: Logistic Regression Model for Murder Prediction by Borough
+
+1. **Model Overview**:
+   - This logistic regression model predicts the likelihood of an incident resulting in a murder (`Murder = 1`) based solely on the borough where the incident occurred (`BORO`).
+
+2. **Key Findings**:
+   - The coefficients for `BROOKLYN`, `MANHATTAN`, and `QUEENS` are statistically significant, indicating that incidents in these boroughs are associated with a lower likelihood of murder compared to the baseline (likely the omitted borough, `BRONX`).
+   - The coefficient for `STATEN ISLAND` is not statistically significant (p-value = 0.69751), suggesting no significant difference in murder likelihood compared to the baseline.
+
+3. **Interpretation of Coefficients**:
+   - Negative coefficients for significant boroughs (e.g., `BROOKLYN: -0.19955`, `MANHATTAN: -0.16195`) suggest that incidents in these boroughs are less likely to result in murder relative to the baseline.
+   - The baseline borough (likely `BRONX`) could have a higher murder likelihood, making it a critical area for further investigation.
+   
+```{r logistic_reg}
+# Filter out null or blank values
+data_model <- data_cleaned %>%
+  filter(
+    VIC_RACE != "(null)", PERP_RACE != "(null)",
+    BORO != "(null)", VIC_RACE != "", PERP_RACE != ""
+  ) %>%
+  mutate(
+    Murder = as.integer(STATISTICAL_MURDER_FLAG), # Convert Murder flag to numeric (1 = murder, 0 = not murder)
+    BORO = factor(BORO)
+  )
+
+# Simplified model: Remove VIC_RACE and PERP_RACE
+log_model_simplified <- glm(Murder ~ BORO, data = data_model, family = binomial)
+summary(log_model_simplified)
+```
+
+### Bias in data and analysis
+
+The dataset and analysis are subject to several potential biases that could impact the validity of insights.
+
+Firstly, there is reporting bias, as the data only includes reported and recorded incidents, potentially underrepresenting crimes in communities with less trust in law enforcement or limited access to reporting channels.
+
+Secondly, missing data, including the substantial proportion of “Unknown” perpetrator races, could obscure meaningful patterns and disproportionately affect specific demographic groups.
+
+Additionally, geographic bias may arise from variations in law enforcement practices and resource allocation across boroughs, potentially influencing the accuracy of incident classification. In the analysis, the exclusion of rows with missing or null values might introduce selection bias, as the omitted data could have systematic differences compared to retained entries.
+
+Lastly, the simplification of complex socio-economic and contextual factors into a borough-level or demographic-based analysis may overlook important interactions and structural inequalities driving the observed patterns. These biases underscore the need for caution when interpreting results and highlight areas for further investigation and refinement.

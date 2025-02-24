@@ -1,0 +1,198 @@
+---
+title: "dtsa5301_wk5_covid"
+author: "tg1073"
+date: "2025-02-20"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# Conditionally install and load packages.
+packages <- c("tidyverse", "lubridate", "knitr", "ggplot2", "dplyr", "tidyr","forecast")
+for (p in packages) {
+  if (!require(p, character.only = TRUE)) {
+    install.packages(p, dependencies = TRUE)
+    library(p, character.only = TRUE)
+  }
+}
+# Knit options
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+------------------------------------------------------------------------
+
+### 1. Data Import
+
+In this section, we download the COVID-19 confirmed-case data from the official Johns Hopkins GitHub repository. We store them in a data frames (covid_confirmed). The CSV file contains worldwide COVID-19 data in a wide format, with each date as a separate column. 
+
+```{r data-import}
+confirmed_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/refs/heads/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv"
+
+# Read the CSV into data frame
+covid_confirmed <- read.csv(confirmed_url, check.names = FALSE)
+```
+
+------------------------------------------------------------------------
+
+### 2. Data Wrangling
+
+Here, we transform the wide-format Johns Hopkins data to a tidy, long-format structure using pivot_longer. We parse the dates using the lubridate package, creating a standard R Date object. Finally, we filter for the US, so we can concentrate on domestic patterns. This step is critical to ensure that our data is consistent and ready for visualization and modeling.
+
+```{r wrangling}
+# "Date" columns are pivoted to a single column
+covid_confirmed_long <- covid_confirmed %>%
+  pivot_longer(
+    cols = -c("Province/State", "Country/Region", "Lat", "Long"),
+    names_to = "Date",
+    values_to = "Confirmed"
+  ) %>%
+  mutate(Date = lubridate::mdy(Date))
+
+# In this exercise: Focus on a single country (US)
+covid_us <- covid_confirmed_long %>%
+  filter(`Country/Region` == "US")
+
+```
+
+------------------------------------------------------------------------
+
+### 3. Visualization 1
+
+This plot aggregates daily confirmed counts across the US to get cumulative totals by date. We create covid_us_summary by grouping and summing the data, then plot it with ggplot2. The blue line shows how confirmed cases build up over time, providing a clear snapshot of the pandemic’s progression in the US.
+
+```{r plot-confirmed, fig.width=7, fig.height=4}
+# Plot the cumulative confirmed cases in the US over time
+covid_us_summary <- covid_us %>%
+  group_by(Date) %>%
+  summarize(Confirmed = sum(Confirmed, na.rm = TRUE))
+
+ggplot(covid_us_summary, aes(x = Date, y = Confirmed)) +
+  geom_line(color = "blue") +
+  labs(
+    title = "Cumulative Confirmed COVID-19 Cases in the US",
+    x = "Date",
+    y = "Total Confirmed Cases"
+  ) +
+  theme_minimal()
+```
+
+------------------------------------------------------------------------
+
+### 4. Visualization 2
+
+In the second visualization, we calculate daily new COVID-19 cases by taking the difference between consecutive days’ cumulative totals. A bar chart is used to highlight day-to-day spikes or drops. This is a more granular look than the cumulative plot, clearly showing where the highest daily surges occurred and allowing us to see how case levels vary from day to day.
+
+```{r plot-daily, fig.width=7, fig.height=4}
+# Compute daily new cases, then plot
+covid_us_daily <- covid_us_summary %>%
+  arrange(Date) %>%
+  mutate(NewCases = Confirmed - lag(Confirmed, default = 0))
+
+ggplot(covid_us_daily, aes(x = Date, y = NewCases)) +
+  geom_bar(stat = "identity", fill = "red") +
+  labs(
+    title = "Daily New COVID-19 Cases in the US",
+    x = "Date",
+    y = "New Cases"
+  ) +
+  theme_minimal()
+```
+
+------------------------------------------------------------------------
+
+### 5. Time Series Model
+
+In this portion, we focus on the year 2021 for a more detailed analysis. We create a training set (Jan 1–Nov 30, 2021) and a test set (Dec 1–Dec 31, 2021) to see how well our model forecasts data that it hasn’t seen. Using auto.arima, we fit an ARIMA(5,1,5) model (as selected by the algorithm) to capture autocorrelation and trends in daily new cases.
+
+We then generate a 31-day forecast for December 2021 and compare it directly to the actual December data. The plot (from July onward) overlays the observed values (in black) with the forecast (in blue), plus a 95% confidence interval shaded in light blue. This comparison lets us evaluate how accurate the model’s predictions are during that final month.
+
+Starting in December, we observed that the actual values (black) in December quickly rise above the model’s predicted range (blue), which suggests the ARIMA model didn’t capture the surge in cases at the end of the year (likely driven by the Omicron wave). In other words, while the model fit earlier months fairly well, it underestimated the sudden spike that actually occurred in December.
+
+```{r arima, message=FALSE, warning=FALSE}
+# 1) Filter data to only year 2021
+covid_us_daily_2021 <- covid_us_daily %>%
+  filter(Date >= as.Date("2021-01-01"), Date <= as.Date("2021-12-31")) %>%
+  arrange(Date)
+
+# 2) Split into "training" (Jan 1 - Nov 30) and "test" (Dec 1 - Dec 31)
+train_data <- covid_us_daily_2021 %>%
+  filter(Date <= as.Date("2021-11-30"))
+
+test_data <- covid_us_daily_2021 %>%
+  filter(Date >= as.Date("2021-12-01"))  # 31 days in December
+
+# 3) Create a time series from the training set
+library(forecast)
+
+ts_train <- ts(
+  train_data$NewCases,
+  frequency = 365,          # daily data (approx)
+  start = c(2021, 1)        # "start" is a simple approach for daily
+)
+
+# 4) Fit ARIMA model
+arima_model <- auto.arima(ts_train, seasonal = FALSE)
+summary(arima_model)
+
+# 5) Forecast the next 31 days (the length of test_data)
+horizon <- nrow(test_data)
+arima_forecast <- forecast(arima_model, h = horizon)
+
+# 6) Build a data frame with forecast + confidence intervals
+forecast_dates <- seq.Date(
+  from = as.Date("2021-12-01"),
+  by = "day",
+  length.out = horizon
+)
+
+fc_df <- data.frame(
+  Date = forecast_dates,
+  Forecast = as.numeric(arima_forecast$mean),
+  Lo95 = as.numeric(arima_forecast$lower[,2]),
+  Hi95 = as.numeric(arima_forecast$upper[,2])
+)
+
+# 7) Combine forecast df with the actual test data
+compare_df <- test_data %>%
+  select(Date, Actual = NewCases) %>%
+  left_join(fc_df, by = "Date")
+
+# 8) For plotting from July 2021 onward, create a combined df
+plot_data <- covid_us_daily_2021 %>%
+  filter(Date >= as.Date("2021-07-01")) %>%
+  # We'll call the real daily cases "Actual"
+  mutate(Actual = NewCases) %>%
+  left_join(fc_df, by = "Date") # Adds the forecast columns where Date matches
+
+# 9) Plot with ggplot2
+ggplot(plot_data, aes(x = Date)) +
+  # Actual data (black line)
+  geom_line(aes(y = Actual), color = "black") +
+  # Forecast (blue line), only appears where forecast exists (Dec 2021)
+  geom_line(aes(y = Forecast), color = "blue", na.rm = TRUE) +
+  # Add a ribbon for the 95% confidence interval
+  geom_ribbon(aes(ymin = Lo95, ymax = Hi95), fill = "blue", alpha = 0.2, na.rm = TRUE) +
+  labs(
+    title = "COVID-19 Daily New Cases (US, 2021)",
+    subtitle = "Comparison of Actual vs ARIMA Forecast (Dec 2021)",
+    x = "Date",
+    y = "New Cases"
+  ) +
+  theme_minimal()
+```
+
+------------------------------------------------------------------------
+
+### 6. Bias Discussion
+
+Despite being a comprehensive data source, the Johns Hopkins dataset has several potential biases:
+
+-   **Underreporting** : Testing limitations or differences in testing strategies may mean actual cases are undercounted.
+"
+-   **Delays in data reporting** : Different regions may update data on different schedules, creating lags or sudden jumps.
+
+-   **Differences in definitions** : “Confirmed” cases and “COVID-19 deaths” may be defined or recorded differently by various jurisdictions.
+
+These biases can affect any analysis (visualizations or models) that assume the reported numbers fully represent the true spread of COVID-19.
+
