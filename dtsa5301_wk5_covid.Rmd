@@ -114,8 +114,6 @@ In this portion, we focus on the year 2021 for a more detailed analysis. We crea
 
 We then generate a 31-day forecast for December 2021 and compare it directly to the actual December data. The plot (from July onward) overlays the observed values (in black) with the forecast (in blue), plus a 95% confidence interval shaded in light blue. This comparison lets us evaluate how accurate the model’s predictions are during that final month.
 
-Starting in December, we observed that the actual values (black) in December quickly rise above the model’s predicted range (blue), which suggests the ARIMA model didn’t capture the surge in cases at the end of the year (likely driven by the Omicron wave). In other words, while the model fit earlier months fairly well, it underestimated the sudden spike that actually occurred in December.
-
 ```{r arima, message=FALSE, warning=FALSE}
 # 1) Filter data to only year 2021
 covid_us_daily_2021 <- covid_us_daily %>%
@@ -191,8 +189,13 @@ ggplot(plot_data, aes(x = Date)) +
 
 ------------------------------------------------------------------------
 
-### 6. Bias Discussion
+### 6. Conclusion & Bias Discussion
 
+#### Conclusion 
+Starting in December, we observed that the actual values (black) in December quickly rise above the model’s predicted range (blue), which suggests the ARIMA model didn’t capture the surge in cases at the end of the year (likely driven by the Omicron wave). In other words, while the model fit earlier months fairly well, it underestimated the sudden spike that actually occurred in December.
+
+
+#### Bias Discussion
 Despite being a comprehensive data source, the Johns Hopkins dataset has several potential biases:
 
 -   **Underreporting** : Testing limitations or differences in testing strategies may mean actual cases are undercounted.
